@@ -2568,14 +2568,14 @@ obj_ec_tgt_oiod_init(struct obj_io_desc *r_oiods, uint32_t iod_nr,
 /* Get all of recxs of the specific target from the daos offset */
 int
 obj_recx_ec2_daos(struct daos_oclass_attr *oca, int shard,
-		  daos_recx_t *recxs, int nr, daos_recx_t **output_recxs,
-		  int *output_nr)
+		  daos_recx_t **recxs_p, unsigned int *nr)
 {
 	int		cell_nr = obj_ec_cell_rec_nr(oca);
 	int		stripe_nr = obj_ec_stripe_rec_nr(oca);
+	daos_recx_t	*recxs = *recxs_p;
 	daos_recx_t	*tgt_recxs;
 	int		tgt_idx;
-	int		total;
+	unsigned int	total;
 	int		idx;
 	int		i;
 
@@ -2585,7 +2585,7 @@ obj_recx_ec2_daos(struct daos_oclass_attr *oca, int shard,
 	tgt_idx = shard % obj_ec_tgt_nr(oca);
 	/* parity shard conversion */
 	if (tgt_idx >= obj_ec_data_tgt_nr(oca)) {
-		for (i = 0; i < nr; i++) {
+		for (i = 0; i < *nr; i++) {
 			daos_off_t offset = recxs[i].rx_idx;
 
 			if (!(offset & PARITY_INDICATOR))
@@ -2599,14 +2599,11 @@ obj_recx_ec2_daos(struct daos_oclass_attr *oca, int shard,
 								 stripe_nr);
 			recxs[i].rx_nr *= obj_ec_data_tgt_nr(oca);
 		}
-		*output_recxs = recxs;
-		*output_nr = nr;
 		return 0;
 	}
 
 	/* data shard conversion */
-	*output_nr = 0;
-	for (i = 0, total = 0; i < nr; i++) {
+	for (i = 0, total = 0; i < *nr; i++) {
 		daos_off_t offset = recxs[i].rx_idx;
 		daos_off_t end = recxs[i].rx_idx + recxs[i].rx_nr;
 
@@ -2618,7 +2615,7 @@ obj_recx_ec2_daos(struct daos_oclass_attr *oca, int shard,
 	if (tgt_recxs == NULL)
 		return -DER_NOMEM;
 
-	for (i = 0, idx = 0; i < nr; i++) {
+	for (i = 0, idx = 0; i < *nr; i++) {
 		daos_off_t offset = recxs[i].rx_idx;
 		daos_off_t size = recxs[i].rx_nr;
 
@@ -2639,7 +2636,75 @@ obj_recx_ec2_daos(struct daos_oclass_attr *oca, int shard,
 		}
 	}
 
-	*output_nr = total;
-	*output_recxs = tgt_recxs;
+	D_FREE(*recxs_p);
+	*recxs_p = tgt_recxs;
+	*nr = total;
+	return 0;
+}
+
+/* Convert DAOS offset to specific data target daos offset */
+int
+obj_recx_ec_daos2shard(struct daos_oclass_attr *oca, int shard,
+		       daos_recx_t **recxs_p, unsigned int *iod_nr)
+{
+	daos_recx_t	*recx = *recxs_p;
+	int		nr = *iod_nr;
+	int		cell_nr = obj_ec_cell_rec_nr(oca);
+	int		stripe_nr = obj_ec_stripe_rec_nr(oca);
+	daos_recx_t	*tgt_recxs;
+	int		shard_idx = shard % obj_ec_tgt_nr(oca);
+	int		total;
+	int		idx;
+	int		i;
+
+	D_ASSERT(shard_idx < obj_ec_data_tgt_nr(oca));
+	for (i = 0, total = 0; i < nr; i++) {
+		uint64_t offset = recx[i].rx_idx;
+		uint64_t end = offset + recx[i].rx_nr;
+
+		while (offset < end) {
+			int tgt_idx = obj_ec_tgt_of_recx_idx(offset,
+						stripe_nr, cell_nr);
+			if (tgt_idx <= shard_idx)
+				total++;
+			offset = roundup(offset + 1, stripe_nr);
+		}
+	}
+
+	if (total == 0)
+		return 0;
+
+	D_ALLOC_ARRAY(tgt_recxs, total);
+	if (tgt_recxs == NULL)
+		return -DER_NOMEM;
+
+	for (i = 0, idx = 0; i < nr; i++) {
+		uint64_t offset = recx[i].rx_idx;
+		uint64_t end = offset + recx[i].rx_nr;
+
+		while (offset < end) {
+			int tgt_idx = obj_ec_tgt_of_recx_idx(offset,
+						stripe_nr, cell_nr);
+			if (tgt_idx <= shard_idx) {
+				uint64_t rx_idx;
+				uint64_t rx_nr;
+
+				rx_idx = max(offset,
+					     rounddown(offset, stripe_nr) +
+					     shard_idx * cell_nr);
+				rx_nr = min(roundup(rx_idx + 1, cell_nr) -
+					    rx_idx, end - offset);
+				tgt_recxs[idx].rx_idx = rx_idx;
+				tgt_recxs[idx].rx_nr = rx_nr;
+				idx++;
+			}
+			offset = roundup(offset + 1, stripe_nr);
+		}
+	}
+
+	D_FREE(*recxs_p);
+	*recxs_p = tgt_recxs;
+	*iod_nr = total;
+
 	return 0;
 }
