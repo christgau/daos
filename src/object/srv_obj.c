@@ -1183,6 +1183,65 @@ out:
 	return rc;
 }
 
+int
+obj_prep_fetch_sgls(crt_rpc_t *rpc, struct obj_io_context *ioc)
+{
+	struct obj_rw_in	*orw = crt_req_get(rpc);
+	struct obj_rw_out	*orwo = crt_reply_get(rpc);
+	d_sg_list_t		*sgls = orw->orw_sgls.ca_arrays;
+	int			nr = orw->orw_sgls.ca_count;
+	bool			need_alloc = false;
+	int			i;
+	int			j;
+	int			rc = 0;
+
+	for (i = 0; i < nr; i++) {
+		for (j = 0; j < sgls[i].sg_nr; j++) {
+			d_iov_t *iov = &sgls[i].sg_iovs[j];
+
+			if (iov->iov_len < iov->iov_buf_len) {
+				need_alloc = true;
+				break;
+			}
+		}
+	}
+
+	/* reuse input sgls */
+	orwo->orw_sgls.ca_count = orw->orw_sgls.ca_count;
+	orwo->orw_sgls.ca_arrays = orw->orw_sgls.ca_arrays;
+	if (!need_alloc)
+		return 0;
+
+	/* Reset the iov first, easier for error cleanup */
+	for (i = 0; i < nr; i++) {
+		for (j = 0; j < sgls[i].sg_nr; j++)
+			sgls[i].sg_iovs[j].iov_buf = NULL;
+	}
+
+	sgls = orwo->orw_sgls.ca_arrays;
+	for (i = 0; i < nr; i++) {
+		for (j = 0; j < sgls[i].sg_nr; j++) {
+			d_iov_t *iov = &sgls[i].sg_iovs[j];
+
+			D_ALLOC(iov->iov_buf, iov->iov_buf_len);
+			if (iov->iov_buf == NULL)
+				D_GOTO(out, rc = -DER_NOMEM);
+		}
+	}
+	ioc->ioc_free_sgls = 1;
+out:
+	if (rc) {
+		for (i = 0; i < nr; i++) {
+			for (i = 0; j < sgls[i].sg_nr; j++) {
+				D_FREE(sgls[i].sg_iovs[j].iov_buf);
+				sgls[i].sg_iovs[j].iov_buf = NULL;
+			}
+		}
+	}
+
+	return rc;
+}
+
 static int
 obj_local_rw(crt_rpc_t *rpc, struct obj_io_context *ioc,
 	     daos_iod_t *split_iods, struct dcs_iod_csums *split_csums,
@@ -1333,8 +1392,9 @@ obj_local_rw(crt_rpc_t *rpc, struct obj_io_context *ioc,
 			if (rc != 0)
 				goto out;
 		} else {
-			orwo->orw_sgls.ca_count = orw->orw_sgls.ca_count;
-			orwo->orw_sgls.ca_arrays = orw->orw_sgls.ca_arrays;
+			rc = obj_prep_fetch_sgls(rpc, ioc);
+			if (rc)
+				goto out;
 		}
 		recov_lists = vos_ioh2recx_list(ioh);
 		rc = obj_singv_ec_rw_filter(&orw->orw_oid, iods, offs,
@@ -1770,6 +1830,21 @@ out:
 
 	rc = dtx_end(&dth, ioc.ioc_coc, rc);
 	obj_rw_reply(rpc, rc, ioc.ioc_map_ver, 0, ioc.ioc_coc);
+	if (ioc.ioc_free_sgls) {
+		d_sg_list_t *sgls = orwo->orw_sgls.ca_arrays;
+		int i;
+		int j;
+
+		for (i = 0; i < orw->orw_nr; i++) {
+			for (j = 0; j < sgls[i].sg_nr; j++) {
+				if (sgls[i].sg_iovs[j].iov_buf == NULL)
+					continue;
+				D_FREE(sgls[i].sg_iovs[j].iov_buf);
+				sgls[i].sg_iovs[j].iov_buf = NULL;
+			}
+		}
+	}
+
 	D_FREE(mbs);
 	obj_ioc_end(&ioc, rc);
 }
