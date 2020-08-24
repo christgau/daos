@@ -52,7 +52,9 @@ type (
 	// FirmwareQueryRequest defines the parameters for a firmware query.
 	FirmwareQueryRequest struct {
 		pbin.ForwardableRequest
-		Devices []string // requested device UIDs, empty for all
+		Devices    []string // requested device UIDs, empty for all
+		ModelID    string   // filter by model ID
+		FWRevision string   // filter by current FW revision
 	}
 
 	// ModuleFirmware represents the results of a firmware query for a specific
@@ -73,6 +75,8 @@ type (
 		pbin.ForwardableRequest
 		Devices      []string // requested device UIDs, empty for all
 		FirmwarePath string   // location of the firmware binary
+		ModelID      string   // filter devices by model ID
+		FWRevision   string   // filter devices by current FW revision
 	}
 
 	// ModuleFirmwareUpdateResult represents the result of a firmware update for

@@ -43,8 +43,11 @@ type (
 	// devices.
 	FirmwareQueryReq struct {
 		unaryRequest
-		SCM  bool // Query SCM devices
-		NVMe bool // Query NVMe devices
+		SCM        bool     // Query SCM devices
+		NVMe       bool     // Query NVMe devices
+		Devices    []string // Specific devices to query
+		ModelID    string   // Filter by model ID
+		FWRevision string   // Filter by current FW revision
 	}
 
 	// FirmwareQueryResp returns storage device firmware information.

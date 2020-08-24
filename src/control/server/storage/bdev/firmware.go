@@ -59,6 +59,8 @@ type (
 		pbin.ForwardableRequest
 		DeviceAddrs  []string // requested device PCI addresses, empty for all
 		FirmwarePath string   // location of the firmware binary
+		ModelID      string   // filter devices by model ID
+		FWRevision   string   // filter devices by current FW revision
 	}
 
 	// DeviceFirmwareUpdateResult represents the result of a firmware update for
