@@ -25,8 +25,8 @@
 package bdev
 
 import (
-	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/pkg/errors"
 
@@ -91,13 +91,9 @@ func (p *Provider) UpdateFirmware(req FirmwareUpdateRequest) (*FirmwareUpdateRes
 		return nil, errors.New("missing path to firmware file")
 	}
 
-	controllers, err := p.getRequestedControllers(req.DeviceAddrs)
+	controllers, err := p.getRequestedControllers(req)
 	if err != nil {
 		return nil, err
-	}
-
-	if len(controllers) == 0 {
-		return nil, errors.New("no NVMe device controllers")
 	}
 
 	resp := &FirmwareUpdateResponse{
@@ -117,7 +113,22 @@ func (p *Provider) UpdateFirmware(req FirmwareUpdateRequest) (*FirmwareUpdateRes
 	return resp, nil
 }
 
-func (p *Provider) getRequestedControllers(requestedPCIAddrs []string) (storage.NvmeControllers, error) {
+func (p *Provider) getRequestedControllers(req FirmwareUpdateRequest) (storage.NvmeControllers, error) {
+	controllers, err := p.getRequestedControllersByAddr(req.DeviceAddrs)
+	if err != nil {
+		return nil, err
+	}
+
+	controllers = filterControllers(controllers, req.ModelID, req.FWRevision)
+
+	if len(controllers) == 0 {
+		return nil, errors.New("no NVMe device controllers")
+	}
+
+	return controllers, nil
+}
+
+func (p *Provider) getRequestedControllersByAddr(requestedPCIAddrs []string) (storage.NvmeControllers, error) {
 	resp, err := p.backend.Scan(ScanRequest{})
 	if err != nil {
 		return nil, err
@@ -149,7 +160,22 @@ func getDeviceController(pciAddr string, controllers storage.NvmeControllers) (*
 		}
 	}
 
-	return nil, fmt.Errorf("no NVMe controller found with PCI address %q", pciAddr)
+	return nil, FaultPCIAddrNotFound(pciAddr)
+}
+
+func filterControllers(controllers storage.NvmeControllers, modelID, fwRev string) storage.NvmeControllers {
+	selected := make(storage.NvmeControllers, 0, len(controllers))
+	for _, ctrlr := range controllers {
+		if filterMatches(modelID, ctrlr.Model) &&
+			filterMatches(fwRev, ctrlr.FwRev) {
+			selected = append(selected, ctrlr)
+		}
+	}
+	return selected
+}
+
+func filterMatches(filterStr, actualStr string) bool {
+	return filterStr == "" || strings.ToUpper(actualStr) == strings.ToUpper(filterStr)
 }
 
 // FirmwareForwarder forwards firmware requests to a privileged binary.

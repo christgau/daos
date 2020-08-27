@@ -99,7 +99,7 @@ func (mi *MockInvoker) InvokeUnaryRPC(_ context.Context, uReq UnaryRequest) (*Un
 	}, nil
 }
 
-func (mi *MockInvoker) InvokeUnaryRPCAsync(_ context.Context, _ UnaryRequest) (HostResponseChan, error) {
+func (mi *MockInvoker) InvokeUnaryRPCAsync(_ context.Context, req UnaryRequest) (HostResponseChan, error) {
 	return mi.cfg.HostResponses, mi.cfg.UnaryError
 }
 
