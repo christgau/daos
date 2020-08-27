@@ -7,7 +7,7 @@ set -ex
 # JENKINS-52781 tar function is breaking symlinks
 rm -rf test_results
 mkdir test_results
-# shellcheck source=../../.build_vars.sh
+# shellcheck disable=SC1091
 source ./.build_vars.sh
 rm -f "${SL_BUILD_DIR}/src/control/src/github.com/daos-stack/daos/src/control"
 mkdir -p "${SL_BUILD_DIR}/src/control/src/github.com/daos-stack/daos/src/"
